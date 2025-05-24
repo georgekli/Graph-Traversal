@@ -1,0 +1,362 @@
+import copy
+import time
+import sys
+from abc import ABC
+from typing import Tuple, Union, Dict, List, Any
+import math
+import numpy as np
+
+from commonroad.scenario.trajectory import State
+
+sys.path.append('../')
+from SMP.maneuver_automaton.motion_primitive import MotionPrimitive
+from SMP.motion_planner.node import Node, CostNode
+from SMP.motion_planner.plot_config import DefaultPlotConfig
+from SMP.motion_planner.queue import FIFOQueue, LIFOQueue
+from SMP.motion_planner.search_algorithms.base_class import SearchBaseClass
+from SMP.motion_planner.utility import MotionPrimitiveStatus, initial_visualization, update_visualization
+
+class SequentialSearch(SearchBaseClass, ABC):
+    """
+    Abstract class for search motion planners.
+    """
+
+    # declaration of class variables
+    path_fig: Union[str, None]
+
+    def __init__(self, scenario, planningProblem, automaton, plot_config=DefaultPlotConfig):
+        super().__init__(scenario=scenario, planningProblem=planningProblem, automaton=automaton,
+                         plot_config=plot_config)
+        self.node_initial = None
+        self.goal_node_reached = None
+
+    def initialize_search(self, time_pause, cost=True):
+        """
+        initializes the visualizer
+        returns the initial node
+        """
+        self.list_status_nodes = []
+        self.dict_node_status: Dict[int, Tuple] = {}
+        self.time_pause = time_pause
+        self.visited_nodes = []
+
+        # first node
+        if cost:
+            node_initial = CostNode(list_paths=[[self.state_initial]],
+                                        list_primitives=[self.motion_primitive_initial],
+                                        depth_tree=0, cost=0)
+        else:
+            node_initial = Node(list_paths=[[self.state_initial]],
+                                list_primitives=[self.motion_primitive_initial],
+                                depth_tree=0)
+        initial_visualization(self.scenario, self.state_initial, self.shape_ego, self.planningProblem,
+                              self.config_plot, self.path_fig)
+        self.dict_node_status = update_visualization(primitive=node_initial.list_paths[-1],
+                                                     status=MotionPrimitiveStatus.IN_FRONTIER,
+                                                     dict_node_status=self.dict_node_status, path_fig=self.path_fig,
+                                                     config=self.config_plot,
+                                                     count=len(self.list_status_nodes), time_pause=self.time_pause)
+        self.list_status_nodes.append(copy.copy(self.dict_node_status))
+        return node_initial
+
+    def take_step(self, successor, node_current, cost=True):
+        """
+        Visualizes the step of a successor and checks if it collides with either an obstacle or a boundary
+        cost is equal to the cost function up until this node
+        Returns collision boolean and the child node if it does not collide
+        """
+        # translate and rotate motion primitive to current position
+        list_primitives_current = copy.copy(node_current.list_primitives)
+        path_translated = self.translate_primitive_to_current_state(successor,
+                                                                    node_current.list_paths[-1])
+        list_primitives_current.append(successor)
+        self.path_new = node_current.list_paths + [[node_current.list_paths[-1][-1]] + path_translated]
+        if cost:
+            child = CostNode(list_paths=self.path_new,
+                                 list_primitives=list_primitives_current,
+                                 depth_tree=node_current.depth_tree + 1,
+                                 cost=self.cost_function(node_current))
+        else:
+            child = Node(list_paths=self.path_new, list_primitives=list_primitives_current,
+                         depth_tree=node_current.depth_tree + 1)
+
+        # check for collision, skip if is not collision-free
+        if not self.is_collision_free(path_translated):
+
+            position = self.path_new[-1][-1].position.tolist()
+            self.list_status_nodes, self.dict_node_status, self.visited_nodes = self.plot_colliding_primitives(current_node=node_current,
+                                                                                           path_translated=path_translated,
+                                                                                           node_status=self.dict_node_status,
+                                                                                           list_states_nodes=self.list_status_nodes,
+                                                                                           time_pause=self.time_pause,
+                                                                                           visited_nodes=self.visited_nodes)
+            return True, child
+        self.update_visuals()
+        return False, child
+
+    def update_visuals(self):
+        """
+        Visualizes a step on plot
+        """
+        position = self.path_new[-1][-1].position.tolist()
+        if position not in self.visited_nodes:
+            self.dict_node_status = update_visualization(primitive=self.path_new[-1],
+                                                         status=MotionPrimitiveStatus.IN_FRONTIER,
+                                                         dict_node_status=self.dict_node_status, path_fig=self.path_fig,
+                                                         config=self.config_plot,
+                                                         count=len(self.list_status_nodes), time_pause=self.time_pause)
+            self.list_status_nodes.append(copy.copy(self.dict_node_status))
+        self.visited_nodes.append(position)
+
+    def goal_reached(self, successor, node_current):
+        """
+        Checks if the goal is reached.
+        Returns True/False if goal is reached
+        """
+        path_translated = self.translate_primitive_to_current_state(successor,
+                                                                    node_current.list_paths[-1])
+        # goal test
+        if self.reached_goal(path_translated):
+            # goal reached
+            self.path_new = node_current.list_paths + [[node_current.list_paths[-1][-1]] + path_translated]
+            path_solution = self.remove_states_behind_goal(self.path_new)
+            self.list_status_nodes = self.plot_solution(path_solution=path_solution, node_status=self.dict_node_status,
+                                                        list_states_nodes=self.list_status_nodes, time_pause=self.time_pause)
+            return True
+        return False
+
+    def get_obstacles_information(self):
+        """
+        Information regarding the obstacles.
+        Returns a list of obstacles' information, each element
+        contains information regarding an obstacle:
+        [x_center_position, y_center_position, length, width]
+
+        """
+        return self.extract_collision_obstacles_information()
+
+    def get_goal_information(self):
+        """
+        Information regarding the goal.
+        Returns a list of the goal's information
+        with the following form:
+        [x_center_position, y_center_position, length, width]
+        """
+        return self.extract_goal_information()
+
+    def get_node_information(self, node_current):
+        """
+        Information regarding the input node_current.
+        Returns a list of the node's information
+        with the following form:
+        [x_center_position, y_center_position]
+        """
+        return node_current.get_position()
+
+    def get_node_path(self, node_current):
+        """
+        Information regarding the input node_current.
+        Returns the path starting from the initial node and ending at node_current.
+        """
+        return node_current.get_path()
+
+    def cost_function(self, node_current):
+        """
+        Returns g(n) from initial to current node, !only works with cost nodes!
+        """
+        velocity = node_current.list_paths[-1][-1].velocity
+
+        node_center = self.get_node_information(node_current)
+        goal_center = self.get_goal_information()
+        distance_x = goal_center[0] - node_center[0]
+        distance_y = goal_center[1] - node_center[1]
+        length_goal = goal_center[2]
+        width_goal = goal_center[3]
+
+        distance = 4.5
+        if(abs(distance_x)<length_goal/2 and abs(distance_y)<width_goal/2):
+            prev_x = node_current.list_paths[-2][-1].position[0]
+            prev_y = node_current.list_paths[-2][-1].position[1]
+            distance = goal_center[0] - length_goal / 2 - prev_x
+        cost = node_current.cost + distance
+        
+        return cost
+
+    def euclidean_heuristic_function(self, node_current):
+        """
+        Heuristic function that calculates the euclidean distance of current node to goal node
+        """
+        goal_x = self.get_goal_information()[0]  # Get X center coordinate of goal
+        goal_y = self.get_goal_information()[1]  # Get Y center coordinate of goal
+        node_x = self.get_node_information(node_current)[0]  # Get X center coordinate of current node
+        node_y = self.get_node_information(node_current)[1]  # Get Y center coordinate of current node
+        # Calculate the euclidean distance
+        distance = math.sqrt((goal_x - node_x) ** 2 + (goal_y - node_y) ** 2)
+        return distance
+
+    def advanced_heuristic_function(self, node_current):
+        """
+        Heuristic function that calculates the euclidean distance of current node to goal node
+        """
+        # Weights list
+        weight_1 = 10000
+        weight_2 = 10000
+        weight_3 = 10000
+        # --------------------------------------------------------------------------------------------------------------
+        # Euclidean distance
+        goal_x = self.get_goal_information()[0]  # Get X center coordinate of goal
+        goal_x = goal_x - self.get_goal_information()[3]/2
+        goal_y = self.get_goal_information()[1]  # Get Y center coordinate of goal
+        node_x = self.get_node_information(node_current)[0]  # Get X center coordinate of current node
+        node_y = self.get_node_information(node_current)[1]  # Get Y center coordinate of current node
+        # Calculate the euclidean distance
+        euclidean_distance = math.sqrt((goal_x - node_x)**2 + (goal_y - node_y)**2)
+        # --------------------------------------------------------------------------------------------------------------
+        # Distance to closest obstacle (max penalisation for going near obstacles)
+        penalty = 0
+        new_penalty = 0
+        for obstacle in self.get_obstacles_information():
+            obs_x_right = obstacle[0] + obstacle[2] / 2
+            obs_x_left = obstacle[0] - obstacle[2] / 2
+            obs_y_top = obstacle[1] + obstacle[3] / 2
+            obs_y_bot = obstacle[1] - obstacle[3] / 2
+            # Calculate Euclidean distances
+            # If node is left from obstacle
+            if node_x < obs_x_left:
+                if node_y > obs_y_top:
+                    # Node higher than obstacle, calculate from top left corner
+                    new_penalty = math.sqrt((obs_x_left - node_x) ** 2 + (obs_y_top - node_y) ** 2)
+                elif node_y < obs_y_bot:
+                    # Node lower than obstacle, calculate from bottom left corner
+                    new_penalty = math.sqrt((obs_x_left - node_x) ** 2 + (obs_y_bot - node_y) ** 2)
+                else:
+                    # Node in the same height as obstacle
+                    # Identify if obstacle extends to edge
+                    if obs_y_bot <= -10:
+                        new_penalty = math.sqrt((obs_x_left - node_x) ** 2 + (obs_y_top - node_y) ** 2)
+                    elif obs_y_top >= 10:
+                        new_penalty = math.sqrt((obs_x_left - node_x) ** 2 + (obs_y_bot - node_y) ** 2)
+                    else:
+                        new_penalty = node_x - obs_x_left
+            # If node is on top/bottom of obstacle
+            elif node_x < obs_x_right:
+                # Node on top
+                if node_y > obs_y_top:
+                    new_penalty = node_y - obs_y_top
+                # Node at the bottom
+                else:
+                    new_penalty = obs_y_bot - node_y
+            # If node goes right of the obstacle penalty = 0
+            #if new_penalty > penalty:
+            penalty += new_penalty
+        # ---------------------------------------------------------------------------------------------------------------
+        # Don't go further right than the target
+        distance_x_after_target = goal_x - node_x
+        if distance_x_after_target > 0:
+            distance_x_after_target = 0    # Zero out the distance if the node lies behind target
+        else:
+            distance_x_after_target = -distance_x_after_target
+        # --------------------------------------------------------------------------------------------------------------
+        # Calculated thresholds for max left turn in 4 moves
+        thres_x = 10
+        thres_y = 12
+        # Car approaching from bottom
+        # Calculate bottom right corner
+        goal_br_x = self.get_goal_information()[0] + self.get_goal_information()[3]/2
+        goal_br_y = self.get_goal_information()[1] + self.get_goal_information()[2] / 2
+        if node_x + thres_x > goal_br_x :
+            if node_y + thres_y > goal_br_y:
+                unapproachable = 100
+        else:
+            unapproachable = 0
+        # Car approaching from top
+        # Calculate bottom right corner
+        goal_br_x = self.get_goal_information()[0] + self.get_goal_information()[3] / 2
+        goal_br_y = self.get_goal_information()[1] + self.get_goal_information()[2] / 2
+        if node_x + thres_x > goal_br_x:
+            if node_y - thres_y > goal_br_y:
+                unapproachable = 100
+        else:
+            unapproachable = 0
+        return weight_1*euclidean_distance + weight_2*distance_x_after_target + weight_3*penalty
+
+    def evaluation_function(self, node_current):
+        """
+        f(x) = g(x) + h(x)
+        """
+        g = self.cost_function(node_current)
+        # h = self.euclidean_heuristic_function(node_current)
+        h = self.advanced_heuristic_function(node_current)
+        f = g + h
+        return f
+
+    def print_path(self):
+        # Print the path using ->
+        i = len(self.goal_node_reached.get_path())
+        for node in self.goal_node_reached.get_path():
+            print("(", end='')
+            print(round(node[0], 1),end='')
+            print(",",end='')
+            print(round(node[1], 1),end='')
+            print(")", end='')
+            i -= 1
+            if i == 0:
+                print()
+            else:
+                print("->", end='')
+
+    def iterative_deepening_astar_rec(self, node_current, threshold, distance):
+        minimum = float("inf")
+        for primitive_successor in node_current.get_successors():
+            # print("Visiting Node " + str(node_current))
+            collision_flag, child = self.take_step(successor=primitive_successor, node_current=node_current)
+            # Found an obstacle
+            if collision_flag:
+                continue
+            # Check if goal is reached
+            if self.goal_reached(successor=primitive_successor, node_current=node_current):
+                self.goal_node_reached = node_current
+                return -distance
+            # update the estimation for the cost
+            estimate = self.evaluation_function(child)
+            # if the estimation is greater than the threshold return the estimation (this will be the new threshold)
+            if estimate > threshold:
+                # print("Breached threshold with heuristic: " + str(estimate))
+                return estimate
+            t = self.iterative_deepening_astar_rec(child, threshold, estimate)
+            if t < 0:
+                # if a return of recursive node is negative, the goal is found
+                return t
+            elif t < minimum:
+                minimum = t
+        return minimum
+
+    def execute_search(self, time_pause) -> Tuple[Union[None, List[List[State]]], Union[None, List[MotionPrimitive]], Any]:
+        self.node_initial = self.initialize_search(time_pause=time_pause)
+        #print(self.get_obstacles_information())
+        #print(self.get_goal_information())
+        #print(self.get_node_information(self.node_initial))
+        threshold = self.evaluation_function(self.node_initial)
+        while True:
+            distance = self.iterative_deepening_astar_rec(self.node_initial, threshold, 0)
+            if distance == float("inf"):
+                # Node not found and no more nodes to visit
+                return -1
+            elif distance < 0:
+                # if we found the node, the function returns the negative distance
+                #print("Found the node we're looking for!")
+                return -distance
+            else:
+                # if it hasn't found the node, it returns the (positive) next-bigger threshold
+                threshold = distance
+
+
+
+class IterativeDeepeningAstar(SequentialSearch):
+    """
+    Class for Iterative Deepening Astar Search algorithm.
+    """
+
+    def __init__(self, scenario, planningProblem, automaton, plot_config=DefaultPlotConfig):
+        super().__init__(scenario=scenario, planningProblem=planningProblem, automaton=automaton,
+                         plot_config=plot_config)

@@ -82,7 +82,7 @@ With the **Euclidean heuristic**, the number of steps was significantly higher d
 The performance of the A* algorithm is shown below:
 
 <p align="center">
-  <img src="1.png" alt="Scenario 1 A* Euclidean Heuristic" width="400"/>
+  <img src="Figures/1.png" alt="Scenario 1 A* Euclidean Heuristic" width="400"/>
 </p>
 
 For the IDA* algorithm with the Euclidean heuristic (using $w=1$), the number of steps was also elevated compared to the advanced heuristic. The algorithm visited **235 nodes** to reach the target.
@@ -92,7 +92,7 @@ For the IDA* algorithm with the Euclidean heuristic (using $w=1$), the number of
 The final performance of the A* algorithm with the **Advanced Heuristic** is shown below:
 
 <p align="center">
-  <img src="2.png" alt="Scenario 1 A* Advanced Heuristic" width="400"/>
+  <img src="Figures/2.png" alt="Scenario 1 A* Advanced Heuristic" width="400"/>
 </p>
 
 The IDA* algorithm visited **73 nodes**.
@@ -104,7 +104,7 @@ The IDA* algorithm visited **73 nodes**.
 The performance of the A* algorithm with the **Euclidean Heuristic** is shown below:
 
 <p align="center">
-  <img src="3.png" alt="Scenario 2 A* Euclidean Heuristic" width="400"/>
+  <img src="Figures/3.png" alt="Scenario 2 A* Euclidean Heuristic" width="400"/>
 </p>
 
 It is observed that for $w \geq 5$, the number of visited nodes does not change.
@@ -116,7 +116,7 @@ The IDA* algorithm visited **7425 nodes**. The increased number of nodes compare
 The performance of the A* algorithm with the **Advanced Heuristic** is shown below:
 
 <p align="center">
-  <img src="4.png" alt="Scenario 2 A* Advanced Heuristic" width="400"/>
+  <img src="Figures/4.png" alt="Scenario 2 A* Advanced Heuristic" width="400"/>
 </p>
 
 The IDA* algorithm visited **93 nodes**.
@@ -130,7 +130,7 @@ In this scenario, there are two obstacles extending towards the edges of the mov
 The performance of the A* algorithm with the **Euclidean Heuristic** is shown below:
 
 <p align="center">
-  <img src="5.png" alt="Scenario 3 A* Euclidean Heuristic" width="400"/>
+  <img src="Figures/5.png" alt="Scenario 3 A* Euclidean Heuristic" width="400"/>
 </p>
 
 It is observed that for $w \geq 5$, the number of visited nodes does not change.
@@ -142,7 +142,7 @@ The IDA* algorithm visited **22799 nodes**, highlighting the critical importance
 The performance of the A* algorithm with the **Advanced Heuristic** is shown below:
 
 <p align="center">
-  <img src="6.png" alt="Scenario 3 A* Advanced Heuristic" width="400"/>
+  <img src="Figures/6.png" alt="Scenario 3 A* Advanced Heuristic" width="400"/>
 </p>
 
 The IDA* algorithm visited **38411 nodes**.
@@ -152,7 +152,7 @@ The IDA* algorithm visited **38411 nodes**.
 The performance comparison of the two heuristics for **A*** is:
 
 <p align="center">
-  <img src="7.png" alt="A* Heuristic Comparison" width="600"/>
+  <img src="Figures/7.png" alt="A* Heuristic Comparison" width="600"/>
 </p>
 
 We observe that our custom-designed heuristic generally outperforms the Euclidean heuristic across most scenarios, with the performance difference widening as the heuristic's weight increases. As expected, when the weight is 0, both heuristics yield the same performance.
@@ -160,7 +160,7 @@ We observe that our custom-designed heuristic generally outperforms the Euclidea
 The performance comparison of the two heuristics for **IDA*** is:
 
 <p align="center">
-  <img src="8.png" alt="IDA* Heuristic Comparison" width="600"/>
+  <img src="Figures/8.png" alt="IDA* Heuristic Comparison" width="600"/>
 </p>
 
 For IDA*, our heuristic shows significantly better results in the first two scenarios, but not in the third.
